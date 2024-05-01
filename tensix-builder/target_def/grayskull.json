@@ -1,0 +1,25 @@
+{
+    "llvm-target": "riscv32",
+    "llvm-abiname": "ilp32",
+    "target-endian": "little",
+    "arch": "riscv32",
+    "cpu": "generic-rv32",
+    "os": "none",
+    "vendor": "tenstorrent",
+    "env": "grayskull",
+    "metadata": {
+        "std": false
+    },
+
+    "target-pointer-width": "32",
+    "data-layout": "e-m:e-p:32:32-i64:64-n32-S128",
+
+    "linker": "rust-lld",
+    "linker-flavor": "gnu-lld",
+    "pre-link-args": { "gnu-lld": ["-Ttensix-grayskull.x"] },
+
+    "panic-strategy": "abort",
+    "relocation-model": "static",
+    "singlethread": true,
+    "has-thread-local": false
+}

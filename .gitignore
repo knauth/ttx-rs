@@ -1,0 +1,4 @@
+/target
+/kernels/target
+/kernels/mmul/target
+/kernels/tensix/target

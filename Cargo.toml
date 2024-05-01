@@ -1,0 +1,18 @@
+[package]
+name = "ttx-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+goblin = "0.8.2"
+luwen = {path = "../luwen"}
+
+tensix-builder = {path = "./tensix-builder"}
+macros = {path = "./macros"}
+
+thiserror = "2.0.9"
+
+num-derive = "0.4.2"
+num-traits = "0.2.19"
