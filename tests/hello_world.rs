@@ -28,15 +28,18 @@ fn test_init() {
 fn write_cargo_toml(dir: &TempDir) {
     std::fs::write(
         dir.path().join("Cargo.toml"),
-        r#"
+        format!(
+            r#"
     [package]
     name = "kernel"
     version = "0.1.0"
     edition = "2024"
 
     [dependencies]
-    tensix-std = {path = "/home/drosen/work/tensix-std"}
+    tensix-std = {{path = "{}/../tensix-std"}}
     "#,
+            env!("CARGO_MANIFEST_DIR"),
+        ),
     )
     .unwrap();
 }

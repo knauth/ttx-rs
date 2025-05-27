@@ -19,9 +19,10 @@ impl Firmware {
         edition = "2024"
 
         [dependencies]
-        tensix-std = {{path = "/home/drosen/work/tensix-std"}}
+        tensix-std = {{path = "{}/../tensix-std"}}
         shared = {{path = "{}"}}
         "#,
+                env!("CARGO_MANIFEST_DIR"),
                 shared_path.display()
             ),
         )
