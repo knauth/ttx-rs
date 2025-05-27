@@ -6,40 +6,77 @@ use std::{
 };
 
 #[derive(Clone)]
-pub enum TensixTarget {
+pub enum StandardTarget {
     Grayskull,
     Wormhole,
     Blackhole,
 }
 
-impl Display for TensixTarget {
+impl Display for StandardTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
-            TensixTarget::Grayskull => "Grayskull",
-            TensixTarget::Wormhole => "Wormhole",
-            TensixTarget::Blackhole => "Blackhole",
+            StandardTarget::Grayskull => "Grayskull",
+            StandardTarget::Wormhole => "Wormhole",
+            StandardTarget::Blackhole => "Blackhole",
         };
         f.write_str(name)
     }
 }
 
-impl TensixTarget {
-    pub fn to_target_json(&self) -> String {
+impl StandardTarget {
+    pub fn to_string(&self) -> String {
         match self {
-            TensixTarget::Grayskull => "target_def/grayskull.json",
-            TensixTarget::Wormhole => "target_def/wormhole.json",
-            TensixTarget::Blackhole => "target_def/blackhole.json",
+            StandardTarget::Grayskull => "grayskull",
+            StandardTarget::Wormhole => "wormhole",
+            StandardTarget::Blackhole => "blackhole",
         }
         .to_string()
     }
+}
 
+#[derive(Clone)]
+pub enum Rewrite {
+    Replace {
+        start: String,
+        end: String,
+        replace: String,
+    },
+    Add {
+        value: String,
+    },
+}
+
+#[derive(Clone)]
+pub enum StandardTargetOrCustom {
+    Standard((StandardTarget, Vec<Rewrite>)),
+    Custom(String),
+}
+
+#[derive(Clone)]
+pub enum TensixTarget {
+    Standard(StandardTarget),
+    Custom {
+        name: String,
+        target_def: StandardTargetOrCustom,
+        linker_script: String,
+    },
+}
+
+impl Display for TensixTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TensixTarget::Standard(s) => s.fmt(f),
+            TensixTarget::Custom { name, .. } => f.write_str(name.as_str()),
+        }
+    }
+}
+
+impl TensixTarget {
     pub fn to_string(&self) -> String {
         match self {
-            TensixTarget::Grayskull => "grayskull",
-            TensixTarget::Wormhole => "wormhole",
-            TensixTarget::Blackhole => "blackhole",
+            Self::Standard(s) => s.to_string(),
+            TensixTarget::Custom { name, .. } => name.clone(),
         }
-        .to_string()
     }
 }
 
@@ -59,15 +96,23 @@ impl CargoProfile {
     }
 }
 
+pub enum CacheEnable {
+    CustomDir(PathBuf),
+    Enabled,
+    Disabled,
+}
+
 pub struct CargoOptions {
     pub target: TensixTarget,
     pub profile: CargoProfile,
     pub lto: bool,
+    pub use_cache: CacheEnable,
     pub verbose: bool,
     pub build_std: bool,
     pub default_features: bool,
     pub stack_probes: bool,
     pub kernel_name: String,
+    pub hide_output: bool,
 }
 
 // Check if we might be running inside a cargo invocation.
@@ -81,13 +126,36 @@ fn get_target_dir() -> Option<PathBuf> {
     }
 }
 
-fn get_compiler_artifact(stdout: impl AsRef<str>) -> Option<PathBuf> {
+fn get_compiler_artifact(stdout: impl AsRef<str>) -> Option<CargoResult> {
     for message in cargo_metadata::Message::parse_stream(stdout.as_ref().as_bytes()) {
         let message = message.unwrap();
         match message {
             cargo_metadata::Message::CompilerArtifact(artifact) => {
                 if let Some(artifact) = artifact.executable {
-                    return Some(artifact.as_std_path().to_path_buf());
+                    return Some(CargoResult {
+                        path: artifact.as_std_path().to_path_buf(),
+                        bin: true,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // No executable found... maybe search for a staticlib?
+    for message in cargo_metadata::Message::parse_stream(stdout.as_ref().as_bytes()) {
+        let message = message.unwrap();
+        match message {
+            cargo_metadata::Message::CompilerArtifact(artifact) => {
+                if artifact.target.kind.contains(&"staticlib".to_string())
+                    || artifact.target.kind.contains(&"cdylib".to_string())
+                {
+                    if let Some(filename) = artifact.filenames.get(0) {
+                        return Some(CargoResult {
+                            path: filename.as_std_path().to_path_buf(),
+                            bin: false,
+                        });
+                    }
                 }
             }
             _ => {}
@@ -97,7 +165,12 @@ fn get_compiler_artifact(stdout: impl AsRef<str>) -> Option<PathBuf> {
     None
 }
 
-fn invoke_cargo(path: PathBuf, options: CargoOptions) -> PathBuf {
+pub struct CargoResult {
+    pub path: PathBuf,
+    pub bin: bool,
+}
+
+fn invoke_cargo(path: PathBuf, options: CargoOptions) -> CargoResult {
     let target_map = HashMap::from([
         (
             "grayskull",
@@ -115,9 +188,92 @@ fn invoke_cargo(path: PathBuf, options: CargoOptions) -> PathBuf {
 
     let dir = tempfile::tempdir().unwrap();
     let target = options.target.to_string();
-    let target = target.as_str();
-    let file = dir.path().join(format!("{target}.json"));
-    std::fs::write(&file, target_map[target]).unwrap();
+
+    let mut linker_path = None;
+
+    let target_def_file = match options.target {
+        TensixTarget::Standard(standard_target) => {
+            let file = dir.path().join(format!("{target}.json"));
+            std::fs::write(&file, target_map[standard_target.to_string().as_str()]).unwrap();
+
+            file
+        }
+        TensixTarget::Custom {
+            name,
+            target_def,
+            linker_script,
+        } => {
+            let file = match target_def {
+                StandardTargetOrCustom::Standard((s, mut rewrites)) => {
+                    let target_json = target_map[s.to_string().as_str()];
+                    let mut target_json = String::from_utf8(target_json.to_vec()).unwrap();
+
+                    // Always rewrite the link arg
+                    rewrites.insert(
+                        0,
+                        Rewrite::Replace {
+                            start: "\"pre-link-args\"".to_string(),
+                            end: "},".to_string(),
+                            replace: format!(
+                                "\"pre-link-args\": {{ \"gnu-lld\": [\"-T{}\"] ",
+                                format!("{name}.x"),
+                            ),
+                        },
+                    );
+
+                    for rewrite in rewrites {
+                        match rewrite {
+                            Rewrite::Replace {
+                                start,
+                                end,
+                                replace,
+                            } => {
+                                let start_pos = target_json.find(&start).unwrap();
+                                let end_pos = target_json[start_pos..].find(&end).unwrap();
+
+                                target_json = format!(
+                                    "{}{}{}",
+                                    &target_json[..start_pos],
+                                    replace,
+                                    &target_json[start_pos..][end_pos..]
+                                );
+                            }
+                            Rewrite::Add { value } => {
+                                let end_pos = target_json.rfind("\n}").unwrap();
+                                target_json = format!(
+                                    "{}{}{}",
+                                    &target_json[..end_pos],
+                                    value,
+                                    &target_json[end_pos..]
+                                );
+                            }
+                        }
+                    }
+
+                    // for (index, line) in target_json.lines().enumerate() {
+                    // println!("{index}: {line}");
+                    // }
+
+                    let file = dir.path().join(format!("{name}.json"));
+                    std::fs::write(&file, target_json).unwrap();
+
+                    file
+                }
+                StandardTargetOrCustom::Custom(c) => {
+                    let file = dir.path().join(format!("{name}.json"));
+                    std::fs::write(&file, c).unwrap();
+
+                    file
+                }
+            };
+
+            let link_file = dir.path().join(format!("{name}.x"));
+            std::fs::write(&link_file, linker_script).unwrap();
+            linker_path = Some(dir.path());
+
+            file
+        }
+    };
 
     let build_std = if options.build_std {
         "-Zbuild-std"
@@ -131,7 +287,7 @@ fn invoke_cargo(path: PathBuf, options: CargoOptions) -> PathBuf {
         "build",
         "--message-format=json-render-diagnostics",
         "--target",
-        &file.to_string_lossy(),
+        &target_def_file.to_string_lossy(),
         "--profile",
         &options.profile.to_string(),
         build_std,
@@ -158,10 +314,18 @@ fn invoke_cargo(path: PathBuf, options: CargoOptions) -> PathBuf {
     if !kernel_name.starts_with('"') || !kernel_name.ends_with('"') {
         kernel_name = format!("\"{kernel_name}\"");
     }
-    cargo.env(
-        "RUSTFLAGS",
-        format!("--cfg kernel_name={}", kernel_name),
-    );
+    let mut flags = format!("--cfg kernel_name={}", kernel_name);
+    if let Some(linker_path) = linker_path {
+        flags = format!("{flags} -L {}", linker_path.display());
+    }
+    cargo.env("RUSTFLAGS", flags);
+
+    if let CacheEnable::Enabled | CacheEnable::CustomDir(_) = options.use_cache {
+        cargo.env("RUSTC_WRAPPER", "sccache");
+    }
+    if let CacheEnable::CustomDir(dir) = options.use_cache {
+        cargo.env("SCCACHE_DIR", format!("{}", dir.display()));
+    }
 
     if options.lto {
         cargo.env(
@@ -174,24 +338,37 @@ fn invoke_cargo(path: PathBuf, options: CargoOptions) -> PathBuf {
         unimplemented!("Don't know how to configure")
     }
 
-    let build = cargo
-        .stderr(Stdio::inherit())
-        .current_dir(&path)
-        .output()
-        .expect("Failed to execute cargo build");
+    let mut build = cargo.current_dir(&path);
+    if options.hide_output {
+        build = build.stdout(Stdio::piped()).stderr(Stdio::piped());
+    } else {
+        build = build.stdout(Stdio::piped()).stderr(Stdio::inherit());
+    }
 
-    let stdout = String::from_utf8(build.stdout).unwrap();
+    let build = build.output().expect("Failed to execute cargo build");
+
     if build.status.success() {
-        get_compiler_artifact(&stdout).unwrap_or_else(|| {
-            eprintln!("--- build output ---\n{stdout}");
+        get_compiler_artifact(&String::from_utf8(build.stdout).unwrap()).unwrap_or_else(|| {
+            if options.hide_output {
+                eprintln!(
+                    "--- build output ---\n{}",
+                    String::from_utf8(build.stderr).unwrap()
+                );
+            }
             panic!("build artifact not found in (supposedly successful) build output (see above)");
         })
     } else {
+        if options.hide_output {
+            eprintln!(
+                "--- build output ---\n{}",
+                String::from_utf8(build.stderr).unwrap()
+            );
+        }
         panic!("Cargo build did not complete successfully (see above)");
     }
 }
 
-pub fn build_kernel(path: impl AsRef<Path>, options: CargoOptions) -> PathBuf {
+pub fn build_kernel(path: impl AsRef<Path>, options: CargoOptions) -> CargoResult {
     let path: &Path = &path.as_ref();
     invoke_cargo(path.to_path_buf(), options)
 }

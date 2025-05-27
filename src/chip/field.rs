@@ -1,5 +1,3 @@
-use super::Chip;
-
 #[inline]
 fn right_shift(existing: &mut [u8], shift: u32) {
     let byte_shift = shift as usize / 8;
@@ -121,14 +119,17 @@ fn read_modify(existing: &mut [u8], lower: u32, upper: u32) -> &[u8] {
 
 #[derive(Copy, Clone)]
 pub struct Field {
+    /// Byte Address of base of field
     pub addr: u64,
+    /// Size of field in bytes (how far to read past the base)
     pub size: usize,
+    /// The bits coverered by the field (lower, upper)
     pub bits: Option<(u32, u32)>,
 }
 
-pub fn read_field<'a>(
-    chip: &Chip,
-    mut read_func: impl FnMut(&Chip, u64, &mut [u8]),
+pub fn read_field<'a, C>(
+    context: &mut C,
+    mut read_func: impl FnMut(&mut C, u64, &mut [u8]),
     field: Field,
     value: &'a mut [u8],
 ) -> Option<&'a [u8]> {
@@ -137,7 +138,7 @@ pub fn read_field<'a>(
         return None;
     }
 
-    read_func(chip, field.addr, &mut value[..field.size]);
+    read_func(context, field.addr, &mut value[..field.size]);
 
     let value = if let Some((lower, upper)) = field.bits {
         read_modify(value, lower, upper);
@@ -150,10 +151,10 @@ pub fn read_field<'a>(
     Some(&*value)
 }
 
-pub fn write_field(
-    chip: &Chip,
-    mut read_func: impl FnMut(&Chip, u64, &mut [u8]),
-    mut write_func: impl FnMut(&Chip, u64, &[u8]),
+pub fn write_field<C>(
+    context: &mut C,
+    mut read_func: impl FnMut(&mut C, u64, &mut [u8]),
+    mut write_func: impl FnMut(&mut C, u64, &[u8]),
     field: Field,
     existing: &mut [u8],
     value: &[u8],
@@ -164,40 +165,40 @@ pub fn write_field(
     }
 
     if let Some((lower, upper)) = field.bits {
-        read_func(chip, field.addr, existing);
+        read_func(context, field.addr, existing);
 
         write_modify(existing, value, lower, upper);
 
-        write_func(chip, field.addr, existing);
+        write_func(context, field.addr, existing);
     } else {
         // We are writing the full size of the field
-        write_func(chip, field.addr, &value[..field.size as usize]);
+        write_func(context, field.addr, &value[..field.size as usize]);
     };
 
     Some(())
 }
 
-pub fn read_field_u32(
-    chip: &Chip,
-    read_func: impl FnMut(&Chip, u64, &mut [u8]),
+pub fn read_field_u32<C>(
+    context: &mut C,
+    read_func: impl FnMut(&mut C, u64, &mut [u8]),
     field: Field,
 ) -> u32 {
     let mut output = [0; 4];
-    read_field(chip, read_func, field, &mut output);
+    read_field(context, read_func, field, &mut output);
 
     u32::from_le_bytes(output)
 }
 
-pub fn write_field_u32(
-    chip: &Chip,
-    read_func: impl FnMut(&Chip, u64, &mut [u8]),
-    write_func: impl FnMut(&Chip, u64, &[u8]),
+pub fn write_field_u32<C>(
+    context: &mut C,
+    read_func: impl FnMut(&mut C, u64, &mut [u8]),
+    write_func: impl FnMut(&mut C, u64, &[u8]),
     field: Field,
     value: u32,
 ) {
     let mut temp = [0; 4];
     write_field(
-        chip,
+        context,
         read_func,
         write_func,
         field,
@@ -206,13 +207,13 @@ pub fn write_field_u32(
     );
 }
 
-pub fn write_field_vec(
-    chip: &Chip,
-    read_func: impl FnMut(&Chip, u64, &mut [u8]),
-    write_func: impl FnMut(&Chip, u64, &[u8]),
+pub fn write_field_vec<C>(
+    context: &mut C,
+    read_func: impl FnMut(&mut C, u64, &mut [u8]),
+    write_func: impl FnMut(&mut C, u64, &[u8]),
     field: Field,
     value: &[u8],
 ) {
     let mut temp = vec![0; field.size];
-    write_field(chip, read_func, write_func, field, &mut temp, value);
+    write_field(context, read_func, write_func, field, &mut temp, value);
 }
