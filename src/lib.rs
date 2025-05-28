@@ -5,8 +5,8 @@ pub use macros::kernel;
 pub use tensix_builder;
 
 pub mod chip;
+pub mod kernel;
 pub mod loader;
-pub mod runtime;
 
 pub fn enumerate() -> Vec<usize> {
     luwen::ttkmd_if::PciDevice::scan()

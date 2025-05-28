@@ -170,7 +170,7 @@ pub struct CargoResult {
     pub bin: bool,
 }
 
-fn invoke_cargo(path: PathBuf, options: CargoOptions) -> CargoResult {
+pub fn invoke_cargo<P: AsRef<Path>>(path: P, options: CargoOptions) -> CargoResult {
     let target_map = HashMap::from([
         (
             "grayskull",
@@ -366,9 +366,4 @@ fn invoke_cargo(path: PathBuf, options: CargoOptions) -> CargoResult {
         }
         panic!("Cargo build did not complete successfully (see above)");
     }
-}
-
-pub fn build_kernel(path: impl AsRef<Path>, options: CargoOptions) -> CargoResult {
-    let path: &Path = &path.as_ref();
-    invoke_cargo(path.to_path_buf(), options)
 }

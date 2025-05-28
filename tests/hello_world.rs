@@ -9,7 +9,7 @@ use ttx_rs::{
         noc::{NocId, NocInterface, Tile},
         Chip,
     },
-    runtime::firmware::Firmware,
+    kernel::{Kernel, KernelData},
 };
 
 #[ctor::ctor]
@@ -98,7 +98,7 @@ fn write_main(src_file: &PathBuf, test: &str) {
     .unwrap()
 }
 
-fn build_test(chip: &mut Chip, tile: Option<Vec<Tile>>, file: &str, wait: bool) -> Firmware {
+fn build_test(chip: &mut Chip, noc_id: NocId, tile: Tile, file: &str, wait: bool) -> Kernel {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("src")).unwrap();
 
@@ -114,36 +114,48 @@ fn build_test(chip: &mut Chip, tile: Option<Vec<Tile>>, file: &str, wait: bool) 
         None,
     );
 
-    let mut data = if let chip::loader::BinOrLib::Bin { data, bin_data } = kernel_data {
-        Firmware {
-            path: None,
-            data,
-            bin_data,
-        }
-    } else {
-        unreachable!("Should have forced compilation to be a bin");
-    };
+    chip.load_kernel(kernel_data, noc_id, tile, wait)
+}
 
-    chip.load_firmware(&mut data, tile, wait);
+#[allow(unused)]
+fn build_tests(chip: &mut Chip, tiles: Option<Vec<Tile>>, file: &str, wait: bool) -> KernelData {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("src")).unwrap();
 
-    data
+    let src_file = dir.path().join("src").join("main.rs");
+
+    write_cargo_toml(&dir);
+    write_main(&src_file, file);
+
+    let mut kernel_data = chip::loader::build_kernel(
+        &"test".to_string(),
+        chip.arch(),
+        chip::loader::LoadOptions::new(dir.path()).hide_output(),
+        None,
+    );
+
+    chip.load_kernels(&mut kernel_data, tiles, wait);
+
+    kernel_data
 }
 
 macro_rules! rust_test {
-    ($chip:ident, $tile:expr, {$($t:tt)*}) => {{
+    ($chip:ident, $noc_id:expr, $tile:expr, {$($t:tt)*}) => {{
         let __tile = $tile;
         build_test(
             &mut $chip,
+            $noc_id,
             __tile,
             core::stringify!($($t)*),
             true
         )
     }};
 
-    (nowait, $chip:ident, $tile:expr, {$($t:tt)*}) => {{
+    (nowait, $chip:ident, $noc_id:expr, $tile:expr, {$($t:tt)*}) => {{
         let __tile = $tile;
         build_test(
             &mut $chip,
+            $noc_id,
             __tile,
             core::stringify!($($t)*),
             false
@@ -162,7 +174,8 @@ fn hello_world() {
 
         rust_test! {
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::entry;
 
@@ -186,7 +199,8 @@ fn panic() {
 
         rust_test! {
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::entry;
 
@@ -211,7 +225,8 @@ fn noc_test() {
         let mut kernel_a = rust_test! {
             nowait,
             chip,
-            Some(vec![chip.tensix(1)]),
+            NocId::Noc0,
+            chip.tensix(1),
             {
                 use tensix_std::entry;
 
@@ -301,7 +316,8 @@ fn noc_test() {
         let mut kernel_b = rust_test! {
             nowait,
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::entry;
 
@@ -330,8 +346,8 @@ fn noc_test() {
             }
         };
 
-        let buffer_a = kernel_a.data.sym_table["NOC_BUFFER"];
-        let buffer_b = kernel_b.data.sym_table["NOC_BUFFER"];
+        let buffer_a = kernel_a["NOC_BUFFER"];
+        let buffer_b = kernel_b["NOC_BUFFER"];
 
         let kernal_a_tile = chip.tensix(1);
         let kernal_b_tile = chip.tensix(0);
@@ -433,7 +449,7 @@ fn noc_test() {
         let data = read_buffer_a(5);
         println!("\tCoordinate of b: {:x}", data);
 
-        kernel_a.print_state_diff(&mut chip, NocId::Noc0, kernal_a_tile);
+        kernel_a.print_state_diff();
 
         let data = read_b(a_to_b_dst_addr as u64);
         let data1 = read_b(a_to_b_dst_addr as u64 + 16);
@@ -441,7 +457,7 @@ fn noc_test() {
         println!("\tData sent from a -> b: {:04x}", data);
         println!("\tData sent from b -> a: {:04x}", data1);
 
-        kernel_b.wait(&mut chip, NocId::Noc0, kernal_b_tile);
+        kernel_b.wait_id(NocId::Noc0);
         println!("\tB COPMLETED");
 
         let data = read_b(a_to_b_dst_addr as u64);
@@ -450,9 +466,9 @@ fn noc_test() {
         println!("\tData sent from a -> b: {:04x}", data);
         println!("\tData recieved from b -> a: {:04x}", data1);
 
-        kernel_a.print_state(&mut chip, NocId::Noc0, kernal_a_tile);
+        kernel_a.print_state();
 
-        kernel_a.wait(&mut chip, NocId::Noc0, kernal_a_tile);
+        kernel_a.wait();
         println!("\tA COPMLETED");
     }
 }
@@ -474,7 +490,8 @@ fn dma_test() {
         let mut kernel = rust_test! {
             nowait,
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::{entry, target::noc_map::pci_read};
 
@@ -527,7 +544,7 @@ fn dma_test() {
         dma.buffer[offset as usize..][2] = value[2];
         dma.buffer[offset as usize..][3] = value[3];
 
-        let buffer = kernel.data.sym_table["NOC_BUFFER"];
+        let buffer = kernel["NOC_BUFFER"];
 
         println!("Waiting for start");
 
@@ -553,7 +570,7 @@ fn dma_test() {
 
         println!("Waiting for end");
 
-        kernel.wait(&mut chip, NocId::Noc0, kernel_tensix);
+        kernel.wait();
 
         println!("Ended");
 
@@ -583,7 +600,8 @@ fn manual_dma_read_test() {
         let mut kernel = rust_test! {
             nowait,
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::{entry, target::noc_map::pci_read};
 
@@ -645,7 +663,7 @@ fn manual_dma_read_test() {
         dma.buffer[offset as usize..][2] = value[2];
         dma.buffer[offset as usize..][3] = value[3];
 
-        let buffer = kernel.data.sym_table["NOC_BUFFER"];
+        let buffer = kernel["NOC_BUFFER"];
 
         println!("Waiting for start");
 
@@ -673,7 +691,7 @@ fn manual_dma_read_test() {
 
         println!("Waiting for end");
 
-        kernel.wait(&mut chip, NocId::Noc0, kernel_tensix);
+        kernel.wait();
 
         println!("Ended");
 
@@ -703,7 +721,8 @@ fn manual_dma_write_test() {
         let mut kernel = rust_test! {
             nowait,
             chip,
-            Some(vec![chip.tensix(0)]),
+            NocId::Noc0,
+            chip.tensix(0),
             {
                 use tensix_std::{entry, target::noc_map::pci_read};
 
@@ -757,7 +776,7 @@ fn manual_dma_write_test() {
         let paddr = (dma.physical_address + 15) & !15;
         let offset = paddr - dma.physical_address;
 
-        let buffer = kernel.data.sym_table["NOC_BUFFER"];
+        let buffer = kernel["NOC_BUFFER"];
 
         println!("Waiting for start");
 
@@ -785,7 +804,7 @@ fn manual_dma_write_test() {
 
         println!("Waiting for end");
 
-        kernel.wait(&mut chip, NocId::Noc0, kernel_tensix);
+        kernel.wait();
 
         println!("Ended");
 

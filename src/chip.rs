@@ -2,16 +2,15 @@ use std::sync::{atomic::AtomicBool, Mutex};
 
 use blackhole::Blackhole;
 use grayskull::Grayskull;
-use luwen::{
-    luwen_core::Arch,
-    ttkmd_if::{DmaBuffer, PciDevice},
-};
-use noc::{NocInterface, Tile};
+use luwen::{luwen_core::Arch, ttkmd_if::PciDevice};
+use noc::{NocId, NocInterface, Tile};
 use wormhole::Wormhole;
 
+use crate::kernel::{Kernel, KernelData};
 pub use crate::loader;
 
 pub mod blackhole;
+pub mod dma;
 pub mod field;
 pub mod grayskull;
 pub mod noc;
@@ -56,13 +55,6 @@ pub fn open(index: usize) -> Result<Chip, String> {
             unreachable!("Unkown chip type {id:x}");
         }
     })
-}
-
-pub struct AlignedDmaBuffer {
-    buffer: DmaBuffer,
-    offset: usize,
-    align: u32,
-    size: u32,
 }
 
 impl Chip {
@@ -292,21 +284,23 @@ impl Chip {
         }
     }
 
-    pub fn load(
-        &mut self,
-        name: &str,
-        core: noc::Tile,
-        options: loader::LoadOptions,
-    ) -> loader::KernelBin {
+    pub fn load(&mut self, name: &str, core: noc::Tile, options: loader::LoadOptions) -> Kernel {
         loader::quick_load(name, self.dupe().unwrap(), core, options)
     }
 
-    pub fn load_firmware(
+    pub fn load_kernel(
         &mut self,
-        firmware: &mut crate::runtime::firmware::Firmware,
-        tiles: Option<Vec<Tile>>,
+        mut data: KernelData,
+        noc_id: NocId,
+        tile: Tile,
         wait: bool,
-    ) {
+    ) -> Kernel {
+        self.load_kernels(&mut data, Some(vec![tile]), wait);
+
+        Kernel::new(self.dupe().unwrap(), noc_id, tile, data)
+    }
+
+    pub fn load_kernels(&mut self, data: &mut KernelData, tiles: Option<Vec<Tile>>, wait: bool) {
         tracing::debug!("{}[{}]: stopping cores", self.arch(), self.id());
 
         if let Some(tiles) = &tiles {
@@ -335,7 +329,7 @@ impl Chip {
                     self.id(),
                     tile
                 );
-                firmware.data.load(self, noc::NocId::Noc1, *tile);
+                data.load(self, noc::NocId::Noc1, *tile);
             }
         } else {
             tracing::trace!(
@@ -343,7 +337,7 @@ impl Chip {
                 self.arch(),
                 self.id()
             );
-            firmware.data.load_all(self, noc::NocId::Noc1);
+            data.load_all(self, noc::NocId::Noc1);
         }
 
         tracing::debug!("{}[{}]: starting tensix", self.arch(), self.id());
@@ -365,7 +359,7 @@ impl Chip {
             &all_tensix
         };
 
-        if firmware.bin_data.start_sync.is_some() {
+        if data.bin.start_sync.is_some() {
             tracing::debug!("{}[{}]: waiting for tensix start", self.arch(), self.id());
 
             for (core_id, tile) in all_tiles.iter().enumerate() {
@@ -376,40 +370,19 @@ impl Chip {
                     tile
                 );
 
-                if let Some(id) = firmware.data.sym_table.get("CORE_ID") {
+                if let Some(id) = data.sym_table.get("CORE_ID") {
                     self.noc_write32(noc::NocId::Noc1, *tile, *id, core_id as u32);
                 }
 
-                firmware
-                    .bin_data
-                    .print_state(self, noc::NocId::Noc1, *tile, &firmware.data);
-                while !firmware
-                    .bin_data
-                    .start_sync(self, noc::NocId::Noc1, *tile, &firmware.data)
-                {
-                    if !firmware
-                        .bin_data
-                        .all_complete(self, noc::NocId::Noc1, *tile)
-                    {
-                        firmware.bin_data.print_state_diff(
-                            self,
-                            noc::NocId::Noc1,
-                            *tile,
-                            &firmware.data,
-                        );
+                data.bin.print_state(self, noc::NocId::Noc1, *tile);
+                while !data.bin.start_sync(self, noc::NocId::Noc1, *tile) {
+                    if !data.bin.all_complete(self, noc::NocId::Noc1, *tile) {
+                        data.bin.print_state_diff(self, noc::NocId::Noc1, *tile);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
 
                 tracing::trace!("{}[{}]: fw started on {:?}", self.arch(), self.id(), tile);
-            }
-
-            if wait {
-                tracing::debug!(
-                    "{}[{}]: waiting for kernel to complete",
-                    self.arch(),
-                    self.id()
-                );
             }
         } else {
             tracing::debug!(
@@ -417,17 +390,8 @@ impl Chip {
                 self.arch(),
                 self.id()
             );
-            if wait {
-                tracing::debug!(
-                    "{}[{}]: waiting for kernel to complete",
-                    self.arch(),
-                    self.id()
-                );
-            }
             for tile in all_tiles {
-                firmware
-                    .bin_data
-                    .print_state(self, noc::NocId::Noc1, *tile, &firmware.data);
+                data.bin.print_state(self, noc::NocId::Noc1, *tile);
             }
         }
 
@@ -441,6 +405,11 @@ impl Chip {
             return;
         }
 
+        tracing::debug!(
+            "{}[{}]: waiting for kernel to complete",
+            self.arch(),
+            self.id()
+        );
         for tile in all_tiles {
             tracing::trace!(
                 "{}[{}]: waiting for kernel to complete on {:?}",
@@ -448,15 +417,13 @@ impl Chip {
                 self.id(),
                 tile
             );
-            firmware
-                .bin_data
-                .wait(self, noc::NocId::Noc1, *tile, &firmware.data);
+            data.bin.wait(self, noc::NocId::Noc1, *tile);
         }
 
-        self.stop_firmware(tiles);
+        self.stop_tile(tiles);
     }
 
-    pub fn stop_firmware(&mut self, tiles: Option<Vec<Tile>>) {
+    pub fn stop_tile(&mut self, tiles: Option<Vec<Tile>>) {
         tracing::debug!("{}[{}]: go idle", self.arch(), self.id());
         self.go_idle();
 
@@ -470,46 +437,6 @@ impl Chip {
         } else {
             tracing::trace!("{}[{}]: stopping all tiles", self.arch(), self.id());
             loader::stop_all(self);
-        }
-    }
-
-    pub fn alloc_dma(&mut self, size: u32) -> DmaBuffer {
-        match self {
-            Chip::Grayskull(grayskull) => grayskull
-                .interface
-                .device
-                .allocate_dma_buffer(size)
-                .map_err(|v| v.to_string())
-                .unwrap(),
-            Chip::Wormhole(wormhole) => wormhole
-                .interface
-                .device
-                .allocate_dma_buffer(size)
-                .map_err(|v| v.to_string())
-                .unwrap(),
-            Chip::Blackhole(blackhole) => blackhole
-                .interface
-                .device
-                .allocate_dma_buffer(size)
-                .map_err(|v| v.to_string())
-                .unwrap(),
-        }
-    }
-
-    pub fn alloc_dma_aligned(&mut self, size: u32, align: u32) -> AlignedDmaBuffer {
-        let actual_size = size + align as u32;
-
-        let buffer = self.alloc_dma(actual_size);
-
-        let big_align = align as u64;
-        let aligned_addr = (buffer.physical_address + (big_align - 1)) & !(big_align - 1);
-        let offset = aligned_addr - buffer.physical_address;
-
-        AlignedDmaBuffer {
-            buffer,
-            offset: offset as usize,
-            size: actual_size - offset as u32,
-            align,
         }
     }
 }
