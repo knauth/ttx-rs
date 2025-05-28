@@ -964,12 +964,7 @@ pub fn build_kernel(
     }
 }
 
-pub fn quick_load<'a>(
-    name: &str,
-    device: &mut Chip,
-    core: Tile,
-    options: LoadOptions,
-) -> KernelBin {
+pub fn quick_load(name: &str, mut device: Chip, core: Tile, options: LoadOptions) -> KernelBin {
     device.start();
 
     let arch = match device.arch() {
@@ -1007,12 +1002,12 @@ pub fn quick_load<'a>(
 
     println!("Loading binary to {arch}");
 
-    stop(device, core);
+    stop(&mut device, core);
 
     assert!(kernel.bin, "Can only quick load binary");
     let mut kernel = load_bin_file(device.dupe().unwrap(), core, kernel.path);
 
-    easy_start(device, core);
+    easy_start(&mut device, core);
 
     if kernel.data.start_sync.is_some() {
         println!("Waiting for kernel start");

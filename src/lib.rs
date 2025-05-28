@@ -8,6 +8,10 @@ pub mod chip;
 pub mod loader;
 pub mod runtime;
 
+pub fn enumerate() -> Vec<usize> {
+    luwen::ttkmd_if::PciDevice::scan()
+}
+
 #[macro_export]
 macro_rules! load {
     ($name:expr, $device:ident, $core:expr) => {
@@ -20,13 +24,13 @@ macro_rules! load {
             .parent()
             .unwrap()
             .to_path_buf();
-        let options = $crate::LoadOptions::new(base_path.as_path())$(.$key($value))*;
+        let options = $crate::loader::LoadOptions::new(base_path.as_path())$(.$key($value))*;
 
+        let mut _device = $device.dupe().unwrap();
         $crate::loader::quick_load(
             stringify!($name),
-            &$device,
-            $core.0 as u8,
-            $core.1 as u8,
+            _device,
+            $core,
             options,
         )
     }};

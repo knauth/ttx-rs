@@ -298,7 +298,7 @@ impl Chip {
         core: noc::Tile,
         options: loader::LoadOptions,
     ) -> loader::KernelBin {
-        loader::quick_load(name, self, core, options)
+        loader::quick_load(name, self.dupe().unwrap(), core, options)
     }
 
     pub fn load_firmware(
