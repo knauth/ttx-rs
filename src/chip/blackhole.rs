@@ -3,7 +3,7 @@ use noc_endpoints::Endpoints;
 use pci_noc::PciNoc;
 use telemetry::{Telemetry, TelemetryData, TelemetryError};
 
-use super::noc::NocInterface;
+use super::noc::{NocAddress, NocInterface};
 
 pub mod arc;
 mod noc_endpoints;
@@ -40,7 +40,7 @@ impl Blackhole {
         let endpoints = Endpoints::default();
 
         let mut bh = Blackhole {
-            telemetry: Telemetry::new(&mut noc, endpoints.arc)?,
+            telemetry: Telemetry::new(&mut noc, endpoints.arc.into())?,
             interface: noc,
             endpoints,
             telemetry_cache: None,
@@ -55,7 +55,7 @@ impl Blackhole {
         if self.telemetry_cache.is_none() {
             let temp = Some(
                 self.telemetry
-                    .read(&mut self.interface, self.endpoints.arc)?,
+                    .read(&mut self.interface, self.endpoints.arc.into())?,
             );
             self.telemetry_cache = temp;
         }
@@ -73,39 +73,50 @@ impl Blackhole {
 }
 
 impl NocInterface for Blackhole {
-    fn noc_read(
+    fn noc_read<T: Into<NocAddress>>(
         &mut self,
         noc_id: super::noc::NocId,
-        tile: super::noc::Tile,
+        tile: T,
         addr: u64,
         data: &mut [u8],
     ) {
-        self.interface.tile_read(noc_id, tile, addr, data).unwrap()
+        self.interface
+            .tile_read(noc_id, tile.into(), addr, data)
+            .unwrap()
     }
 
-    fn noc_read32(&mut self, noc_id: super::noc::NocId, tile: super::noc::Tile, addr: u64) -> u32 {
-        self.interface.tile_read32(noc_id, tile, addr).unwrap()
-    }
-
-    fn noc_write(
+    fn noc_read32<T: Into<NocAddress>>(
         &mut self,
         noc_id: super::noc::NocId,
-        tile: super::noc::Tile,
+        tile: T,
+        addr: u64,
+    ) -> u32 {
+        self.interface
+            .tile_read32(noc_id, tile.into(), addr)
+            .unwrap()
+    }
+
+    fn noc_write<T: Into<NocAddress>>(
+        &mut self,
+        noc_id: super::noc::NocId,
+        tile: T,
         addr: u64,
         data: &[u8],
     ) {
-        self.interface.tile_write(noc_id, tile, addr, data).unwrap()
+        self.interface
+            .tile_write(noc_id, tile.into(), addr, data)
+            .unwrap()
     }
 
-    fn noc_write32(
+    fn noc_write32<T: Into<NocAddress>>(
         &mut self,
         noc_id: super::noc::NocId,
-        tile: super::noc::Tile,
+        tile: T,
         addr: u64,
         value: u32,
     ) {
         self.interface
-            .tile_write32(noc_id, tile, addr, value)
+            .tile_write32(noc_id, tile.into(), addr, value)
             .unwrap()
     }
 

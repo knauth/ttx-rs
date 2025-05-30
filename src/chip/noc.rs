@@ -11,24 +11,74 @@ pub enum NocId {
 }
 
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Tile {
+pub struct NocAddress {
     pub n0: (u8, u8),
     pub n1: (u8, u8),
 }
 
-impl Tile {
-    pub fn to_u32(&self) -> u32 {
+impl Into<u32> for NocAddress {
+    fn into(self) -> u32 {
         self.n0.0 as u32
             | ((self.n0.1 as u32) << 8)
             | ((self.n1.0 as u32) << 16)
             | ((self.n1.1 as u32) << 24)
     }
+}
 
+impl From<u32> for NocAddress {
+    fn from(value: u32) -> Self {
+        NocAddress {
+            n0: (value as u8, (value >> 8) as u8),
+            n1: ((value >> 8) as u8, (value >> 24) as u8),
+        }
+    }
+}
+
+impl NocAddress {
     pub fn get(&self, noc_id: NocId) -> (u8, u8) {
         match noc_id {
             NocId::Noc0 => self.n0,
             NocId::Noc1 => self.n1,
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct Tile {
+    pub addr: NocAddress,
+    pub align_read: u8,
+    pub align_write: u8,
+}
+
+impl Into<NocAddress> for Tile {
+    fn into(self) -> NocAddress {
+        self.addr
+    }
+}
+
+impl Into<u32> for Tile {
+    fn into(self) -> u32 {
+        self.addr.into()
+    }
+}
+
+impl Tile {
+    pub fn get(&self, noc_id: NocId) -> (u8, u8) {
+        self.addr.get(noc_id)
+    }
+
+    pub fn align_rw_ptr(&self, addr: u64) -> u64 {
+        self.align_read_ptr(addr).max(self.align_write_ptr(addr))
+    }
+
+    pub fn align_write_ptr(&self, addr: u64) -> u64 {
+        let align = self.align_write as u64;
+        (addr + (align - 1)) & !(align - 1)
+    }
+
+    pub fn align_read_ptr(&self, addr: u64) -> u64 {
+        let align = self.align_read as u64;
+        (addr + (align - 1)) & !(align - 1)
     }
 }
 
@@ -218,10 +268,10 @@ pub fn noc_multicast32(
 }
 
 pub trait NocInterface {
-    fn noc_read(&mut self, noc_id: NocId, tile: Tile, addr: u64, data: &mut [u8]);
-    fn noc_read32(&mut self, noc_id: NocId, tile: Tile, addr: u64) -> u32;
-    fn noc_write(&mut self, noc_id: NocId, tile: Tile, addr: u64, data: &[u8]);
-    fn noc_write32(&mut self, noc_id: NocId, tile: Tile, addr: u64, value: u32);
+    fn noc_read<T: Into<NocAddress>>(&mut self, noc_id: NocId, tile: T, addr: u64, data: &mut [u8]);
+    fn noc_read32<T: Into<NocAddress>>(&mut self, noc_id: NocId, tile: T, addr: u64) -> u32;
+    fn noc_write<T: Into<NocAddress>>(&mut self, noc_id: NocId, tile: T, addr: u64, data: &[u8]);
+    fn noc_write32<T: Into<NocAddress>>(&mut self, noc_id: NocId, tile: T, addr: u64, value: u32);
 
     fn noc_broadcast(&mut self, noc_id: NocId, addr: u64, data: &[u8]);
     fn noc_broadcast32(&mut self, noc_id: NocId, addr: u64, value: u32);

@@ -1,6 +1,6 @@
 use luwen::ttkmd_if::{PciDevice, PciError, PossibleTlbAllocation};
 
-use crate::chip::noc::{self, NocId, Tile};
+use crate::chip::noc::{self, NocAddress, NocId};
 
 pub struct PciNoc {
     pub device: PciDevice,
@@ -11,7 +11,7 @@ impl PciNoc {
     pub fn tile_read(
         &mut self,
         noc_id: NocId,
-        tile: Tile,
+        tile: NocAddress,
         addr: u64,
         data: &mut [u8],
     ) -> Result<(), PciError> {
@@ -27,7 +27,12 @@ impl PciNoc {
         )
     }
 
-    pub fn tile_read32(&mut self, noc_id: NocId, tile: Tile, addr: u64) -> Result<u32, PciError> {
+    pub fn tile_read32(
+        &mut self,
+        noc_id: NocId,
+        tile: NocAddress,
+        addr: u64,
+    ) -> Result<u32, PciError> {
         noc::noc_read32(
             &mut self.device,
             &self.tlb,
@@ -42,7 +47,7 @@ impl PciNoc {
     pub fn tile_write(
         &mut self,
         noc_id: NocId,
-        tile: Tile,
+        tile: NocAddress,
         addr: u64,
         data: &[u8],
     ) -> Result<(), PciError> {
@@ -61,7 +66,7 @@ impl PciNoc {
     pub fn tile_write32(
         &mut self,
         noc_id: NocId,
-        tile: Tile,
+        tile: NocAddress,
         addr: u64,
         value: u32,
     ) -> Result<(), PciError> {

@@ -1,6 +1,6 @@
 use crate::chip::{
     field::Field,
-    noc::{NocId, Tile},
+    noc::{NocAddress, NocId},
 };
 
 use super::{pci_noc::PciNoc, Blackhole};
@@ -49,12 +49,12 @@ fn arc_read(
     data: &mut [u8],
 ) -> Result<(), luwen::ttkmd_if::PciError> {
     chip.interface
-        .tile_read(NocId::Noc0, chip.endpoints.arc, addr, data)
+        .tile_read(NocId::Noc0, chip.endpoints.arc.into(), addr, data)
 }
 
 fn arc_read32(chip: &mut Blackhole, addr: u64) -> Result<u32, luwen::ttkmd_if::PciError> {
     chip.interface
-        .tile_read32(NocId::Noc0, chip.endpoints.arc, addr)
+        .tile_read32(NocId::Noc0, chip.endpoints.arc.into(), addr)
 }
 
 fn arc_write(
@@ -63,7 +63,7 @@ fn arc_write(
     data: &[u8],
 ) -> Result<(), luwen::ttkmd_if::PciError> {
     chip.interface
-        .tile_write(NocId::Noc0, chip.endpoints.arc, addr, data)
+        .tile_write(NocId::Noc0, chip.endpoints.arc.into(), addr, data)
 }
 
 fn arc_write32(
@@ -72,7 +72,7 @@ fn arc_write32(
     value: u32,
 ) -> Result<(), luwen::ttkmd_if::PciError> {
     chip.interface
-        .tile_write32(NocId::Noc0, chip.endpoints.arc, addr, value)
+        .tile_write32(NocId::Noc0, chip.endpoints.arc.into(), addr, value)
 }
 
 impl<const N: usize> MessageQueue<N> {
@@ -301,7 +301,7 @@ impl ArcFwInitStatus {
     }
 }
 
-pub fn arc_fw_init_status(chip: &mut PciNoc, arc: Tile) -> Option<ArcFwInitStatus> {
+pub fn arc_fw_init_status(chip: &mut PciNoc, arc: NocAddress) -> Option<ArcFwInitStatus> {
     chip.tile_read32(NocId::Noc0, arc, 0x80030000 + 0x400 + (4 * 2))
         .ok()
         .map(|boot_status_0| ArcFwInitStatus::from(((boot_status_0 >> 1) & 0x3) as u8))

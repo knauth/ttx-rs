@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::chip::noc::Tile;
+use crate::chip::noc::{NocAddress, Tile};
 
 const DRAM_LOCATIONS: &[(u8, u8)] = &[
     (1, 6),
@@ -35,8 +35,8 @@ pub struct NocGrid {
     pub dram_size: u64,
 }
 
-fn coord_flip(x: u8, y: u8) -> Tile {
-    Tile {
+fn coord_flip(x: u8, y: u8) -> NocAddress {
+    NocAddress {
         n0: (x, y),
         n1: (GRID_SIZE_X - x - 1, GRID_SIZE_Y - y - 1),
     }
@@ -65,15 +65,29 @@ pub fn get_grid(harvest: u32) -> NocGrid {
     }
 
     NocGrid {
-        tensix: good_cores,
-        dram: Vec::from_iter(
-            DRAM_LOCATIONS
-                .into_iter()
-                .cloned()
-                .map(|(x, y)| coord_flip(x, y)),
-        ),
-        pci: coord_flip(PCI_LOCATION.0, PCI_LOCATION.1),
-        arc: coord_flip(ARC_LOCATION.0, ARC_LOCATION.1),
+        tensix: good_cores
+            .into_iter()
+            .map(|addr| Tile {
+                addr,
+                align_read: 16,
+                align_write: 16,
+            })
+            .collect(),
+        dram: Vec::from_iter(DRAM_LOCATIONS.into_iter().cloned().map(|(x, y)| Tile {
+            addr: coord_flip(x, y),
+            align_read: 32,
+            align_write: 16,
+        })),
+        pci: Tile {
+            addr: coord_flip(PCI_LOCATION.0, PCI_LOCATION.1),
+            align_read: 32,
+            align_write: 16,
+        },
+        arc: Tile {
+            addr: coord_flip(ARC_LOCATION.0, ARC_LOCATION.1),
+            align_read: 16,
+            align_write: 16,
+        },
 
         // 1MB per tensix
         tensix_l1_size: 1024 * 1024,

@@ -1,6 +1,6 @@
 use luwen::ttkmd_if::PciError;
 
-use crate::chip::noc::Tile;
+use crate::chip::noc::{NocAddress, Tile};
 
 use super::Blackhole;
 
@@ -24,8 +24,8 @@ const GDDR_NOC0_COORDS: &[[(u8, u8); 3]] = &[
     [(9, 6), (9, 7), (9, 5)],
 ];
 
-fn coord_flip(x: u8, y: u8) -> Tile {
-    Tile {
+fn coord_flip(x: u8, y: u8) -> NocAddress {
+    NocAddress {
         n0: (x, y),
         n1: (GRID_SIZE_X - x - 1, GRID_SIZE_Y - y - 1),
     }
@@ -58,8 +58,12 @@ impl Default for Endpoints {
         Self {
             pcie: Tile::default(),
             arc: Tile {
-                n0: (8, 0),
-                n1: (8, 11),
+                addr: NocAddress {
+                    n0: (8, 0),
+                    n1: (8, 11),
+                },
+                align_read: 16,
+                align_write: 16,
             },
             tensix: [Tile::default(); 140],
             tensix_active_count: 0,
@@ -104,8 +108,12 @@ impl Endpoints {
                 let x = core.0 as u32;
                 if (x <= 7 && x < working_cols) || (x >= 10 && (x - 2) < working_cols) {
                     endpoints.tensix[endpoints.tensix_active_count] = Tile {
-                        n0: (core.0, core.1),
-                        n1: (core.0, core.1),
+                        addr: NocAddress {
+                            n0: (core.0, core.1),
+                            n1: (core.0, core.1),
+                        },
+                        align_read: 16,
+                        align_write: 16,
                     };
                     endpoints.tensix_active_count += 1;
                 }
@@ -125,16 +133,28 @@ impl Endpoints {
             let working_dram = telemetry.enabled_gddr();
             for _ in 0..working_dram.count_ones() {
                 endpoints.dram[endpoints.dram_active_count][0] = Tile {
-                    n0: translated_dram_coords[endpoints.dram_active_count][0],
-                    n1: translated_dram_coords[endpoints.dram_active_count][0],
+                    addr: NocAddress {
+                        n0: translated_dram_coords[endpoints.dram_active_count][0],
+                        n1: translated_dram_coords[endpoints.dram_active_count][0],
+                    },
+                    align_read: 64,
+                    align_write: 16,
                 };
                 endpoints.dram[endpoints.dram_active_count][1] = Tile {
-                    n0: translated_dram_coords[endpoints.dram_active_count][1],
-                    n1: translated_dram_coords[endpoints.dram_active_count][1],
+                    addr: NocAddress {
+                        n0: translated_dram_coords[endpoints.dram_active_count][1],
+                        n1: translated_dram_coords[endpoints.dram_active_count][1],
+                    },
+                    align_read: 64,
+                    align_write: 16,
                 };
                 endpoints.dram[endpoints.dram_active_count][2] = Tile {
-                    n0: translated_dram_coords[endpoints.dram_active_count][2],
-                    n1: translated_dram_coords[endpoints.dram_active_count][2],
+                    addr: NocAddress {
+                        n0: translated_dram_coords[endpoints.dram_active_count][2],
+                        n1: translated_dram_coords[endpoints.dram_active_count][2],
+                    },
+                    align_read: 64,
+                    align_write: 16,
                 };
                 endpoints.dram_active_count += 1;
             }
@@ -143,8 +163,12 @@ impl Endpoints {
             endpoints.tensix_broadcast = [((2, 3), (1, 2)), ((1, 2), (2, 3))];
 
             endpoints.pcie = Tile {
-                n0: (19, 24),
-                n1: (19, 24),
+                addr: NocAddress {
+                    n0: (19, 24),
+                    n1: (19, 24),
+                },
+                align_read: 64,
+                align_write: 16,
             };
         } else {
             let mut working_col_bitmask = telemetry.enabled_tensix_columns();
@@ -162,7 +186,11 @@ impl Endpoints {
 
             for core in all_tensix[..index].into_iter() {
                 if working_cols.contains(&core.0) {
-                    endpoints.tensix[endpoints.tensix_active_count] = coord_flip(core.0, core.1);
+                    endpoints.tensix[endpoints.tensix_active_count] = Tile {
+                        addr: coord_flip(core.0, core.1),
+                        align_read: 16,
+                        align_write: 16,
+                    };
                     endpoints.tensix_active_count += 1;
                 }
             }
@@ -171,18 +199,30 @@ impl Endpoints {
             let mut dram_index = 0;
             while working_dram != 0 {
                 if working_dram & 0x1 != 0 {
-                    endpoints.dram[endpoints.dram_active_count][0] = coord_flip(
-                        GDDR_NOC0_COORDS[dram_index][0].0,
-                        GDDR_NOC0_COORDS[dram_index][0].1,
-                    );
-                    endpoints.dram[endpoints.dram_active_count][1] = coord_flip(
-                        GDDR_NOC0_COORDS[dram_index][1].0,
-                        GDDR_NOC0_COORDS[dram_index][1].1,
-                    );
-                    endpoints.dram[endpoints.dram_active_count][2] = coord_flip(
-                        GDDR_NOC0_COORDS[dram_index][2].0,
-                        GDDR_NOC0_COORDS[dram_index][2].1,
-                    );
+                    endpoints.dram[endpoints.dram_active_count][0] = Tile {
+                        addr: coord_flip(
+                            GDDR_NOC0_COORDS[dram_index][0].0,
+                            GDDR_NOC0_COORDS[dram_index][0].1,
+                        ),
+                        align_read: 64,
+                        align_write: 16,
+                    };
+                    endpoints.dram[endpoints.dram_active_count][1] = Tile {
+                        addr: coord_flip(
+                            GDDR_NOC0_COORDS[dram_index][1].0,
+                            GDDR_NOC0_COORDS[dram_index][1].1,
+                        ),
+                        align_read: 64,
+                        align_write: 16,
+                    };
+                    endpoints.dram[endpoints.dram_active_count][2] = Tile {
+                        addr: coord_flip(
+                            GDDR_NOC0_COORDS[dram_index][2].0,
+                            GDDR_NOC0_COORDS[dram_index][2].1,
+                        ),
+                        align_read: 64,
+                        align_write: 16,
+                    };
                     endpoints.dram_active_count += 1;
                 }
 

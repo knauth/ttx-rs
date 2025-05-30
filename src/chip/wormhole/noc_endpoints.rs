@@ -1,4 +1,4 @@
-use crate::chip::noc::Tile;
+use crate::chip::noc::{NocAddress, Tile};
 
 const DRAM_LOCATIONS: &[[(u8, u8); 3]] = &[
     [(0, 0), (0, 1), (0, 11)],
@@ -42,8 +42,8 @@ const PHYS_Y_TO_NOC_1_Y: &[u8] = &[11, 0, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5];
 const ALL_TENSIX_ROWS: &[u8] = &[1, 2, 3, 4, 5, 7, 8, 9, 10, 11];
 const ALL_TENSIX_COLS: &[u8] = &[1, 2, 3, 4, 6, 7, 8, 9];
 
-fn coord_flip(x: u8, y: u8) -> Tile {
-    Tile {
+fn coord_flip(x: u8, y: u8) -> NocAddress {
+    NocAddress {
         n0: (x, y),
         n1: (GRID_SIZE_X - x - 1, GRID_SIZE_Y - y - 1),
     }
@@ -75,21 +75,36 @@ pub fn get_grid(harvest: u32) -> NocGrid {
     }
 
     NocGrid {
-        tensix: good_cores,
-        dram: Vec::from_iter(
-            DRAM_LOCATIONS
-                .into_iter()
-                .cloned()
-                .map(|cores| cores.map(|(x, y)| coord_flip(x, y))),
-        ),
-        pci: coord_flip(PCI_LOCATION.0, PCI_LOCATION.1),
-        arc: coord_flip(ARC_LOCATION.0, ARC_LOCATION.1),
-        eth: Vec::from_iter(
-            ETH_LOCATIONS
-                .into_iter()
-                .cloned()
-                .map(|(x, y)| coord_flip(x, y)),
-        ),
+        tensix: good_cores
+            .into_iter()
+            .map(|addr| Tile {
+                addr,
+                align_read: 16,
+                align_write: 16,
+            })
+            .collect(),
+        dram: Vec::from_iter(DRAM_LOCATIONS.into_iter().cloned().map(|cores| {
+            cores.map(|(x, y)| Tile {
+                addr: coord_flip(x, y),
+                align_read: 32,
+                align_write: 16,
+            })
+        })),
+        pci: Tile {
+            addr: coord_flip(PCI_LOCATION.0, PCI_LOCATION.1),
+            align_read: 32,
+            align_write: 16,
+        },
+        arc: Tile {
+            addr: coord_flip(ARC_LOCATION.0, ARC_LOCATION.1),
+            align_read: 16,
+            align_write: 16,
+        },
+        eth: Vec::from_iter(ETH_LOCATIONS.into_iter().cloned().map(|(x, y)| Tile {
+            addr: coord_flip(x, y),
+            align_read: 16,
+            align_write: 16,
+        })),
         // 1.5 MB per tensix
         tensix_l1_size: 1536 * 1024,
         // 2 GB per core

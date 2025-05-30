@@ -13,13 +13,27 @@ impl std::ops::Index<std::ops::Range<usize>> for AlignedDmaBuffer {
     type Output = [u8];
 
     fn index(&self, index: std::ops::Range<usize>) -> &Self::Output {
-        &self.buffer.buffer[index.start + self.offset..index.end]
+        &self.buffer.buffer[self.offset..][index]
     }
 }
 
 impl std::ops::IndexMut<std::ops::Range<usize>> for AlignedDmaBuffer {
     fn index_mut(&mut self, index: std::ops::Range<usize>) -> &mut Self::Output {
-        &mut self.buffer.buffer[index.start + self.offset..index.end]
+        &mut self.buffer.buffer[self.offset..][index]
+    }
+}
+
+impl std::ops::Index<usize> for AlignedDmaBuffer {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.buffer.buffer[self.offset + index]
+    }
+}
+
+impl std::ops::IndexMut<usize> for AlignedDmaBuffer {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.buffer.buffer[self.offset + index]
     }
 }
 

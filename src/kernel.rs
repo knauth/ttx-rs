@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    chip::noc::{NocId, NocInterface, Tile},
+    chip::noc::{NocAddress, NocId, NocInterface, Tile},
     Chip,
 };
 
@@ -63,7 +63,7 @@ impl KernelBinData {
         ]
     }
 
-    pub fn start_sync(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) -> bool {
+    pub fn start_sync(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) -> bool {
         if self
             .value_vec(chip, noc_id, tile)
             .core_data
@@ -92,7 +92,7 @@ impl KernelBinData {
         &mut self,
         chip: &mut Chip,
         noc_id: NocId,
-        tile: Tile,
+        tile: NocAddress,
         name: &str,
         panic: &PanicData,
     ) -> bool {
@@ -124,7 +124,7 @@ impl KernelBinData {
         panic_addr: Option<u64>,
         chip: &mut Chip,
         noc_id: NocId,
-        tile: Tile,
+        tile: NocAddress,
     ) -> Option<PanicData> {
         // let name = format!("PANIC_DATA_{name}");
         if let Some(postcode_mapping) = panic_addr {
@@ -137,7 +137,7 @@ impl KernelBinData {
         }
     }
 
-    fn value_vec(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) -> CoreDataCache {
+    fn value_vec(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) -> CoreDataCache {
         let sync = self
             .start_sync
             .map(|sync| chip.noc_read32(noc_id, tile, sync as u64));
@@ -159,15 +159,21 @@ impl KernelBinData {
         }
     }
 
-    pub fn print_state_diff(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) {
+    pub fn print_state_diff(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) {
         self.maybe_print_state(chip, noc_id, tile, false);
     }
 
-    pub fn print_state(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) {
+    pub fn print_state(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) {
         self.maybe_print_state(chip, noc_id, tile, true);
     }
 
-    pub fn maybe_print_state(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile, force: bool) {
+    pub fn maybe_print_state(
+        &mut self,
+        chip: &mut Chip,
+        noc_id: NocId,
+        tile: NocAddress,
+        force: bool,
+    ) {
         let state = self.value_vec(chip, noc_id, tile);
         if !force {
             if (state.sync, &state.core_data)
@@ -228,7 +234,7 @@ impl KernelBinData {
         self.core_data_cache = state;
     }
 
-    pub fn check_panic(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) -> bool {
+    pub fn check_panic(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) -> bool {
         let value = self.value_vec(chip, noc_id, tile);
         value
             .core_data
@@ -236,7 +242,7 @@ impl KernelBinData {
             .any(|v| v.1.map(|v| v == 6).unwrap_or(false))
     }
 
-    pub fn wait(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) {
+    pub fn wait(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) {
         while !self.all_complete(chip, noc_id, tile) {
             std::thread::sleep(std::time::Duration::from_millis(10));
             self.print_state_diff(chip, noc_id, tile);
@@ -248,7 +254,7 @@ impl KernelBinData {
     }
 
     /// Marked by all cores either having completed... or not started
-    pub fn all_complete(&mut self, chip: &mut Chip, noc_id: NocId, tile: Tile) -> bool {
+    pub fn all_complete(&mut self, chip: &mut Chip, noc_id: NocId, tile: NocAddress) -> bool {
         let states = self.state_vec();
 
         let state_value = states
@@ -282,7 +288,9 @@ impl<S: AsRef<str>> std::ops::Index<S> for KernelData {
 }
 
 impl KernelData {
-    pub fn load(&self, chip: &mut Chip, noc_id: NocId, tile: Tile) {
+    pub fn load<T: Into<NocAddress>>(&self, chip: &mut Chip, noc_id: NocId, tile: T) {
+        let tile = tile.into();
+
         for write in &self.writes {
             let data = write.data.0.as_ref();
             // for i in 0..data.len() / 4 {
@@ -353,7 +361,7 @@ impl KernelData {
         &mut self,
         chip: &mut Chip,
         noc_id: NocId,
-        core: Tile,
+        core: NocAddress,
         ncrisc: Option<u64>,
         trisc0: Option<u64>,
         trisc1: Option<u64>,
@@ -465,7 +473,7 @@ impl Kernel {
     pub fn start_sync(&mut self) -> bool {
         self.data
             .bin
-            .start_sync(&mut self.device, self.noc_id, self.core)
+            .start_sync(&mut self.device, self.noc_id, self.core.addr)
     }
 
     pub fn print_state_diff(&mut self) {
@@ -479,17 +487,17 @@ impl Kernel {
     pub fn maybe_print_state(&mut self, force: bool) {
         self.data
             .bin
-            .maybe_print_state(&mut self.device, self.noc_id, self.core, force)
+            .maybe_print_state(&mut self.device, self.noc_id, self.core.addr, force)
     }
 
     pub fn check_panic(&mut self) -> bool {
         self.data
             .bin
-            .check_panic(&mut self.device, self.noc_id, self.core)
+            .check_panic(&mut self.device, self.noc_id, self.core.addr)
     }
 
     pub fn wait_id(&mut self, noc_id: NocId) {
-        self.data.bin.wait(&mut self.device, noc_id, self.core);
+        self.data.bin.wait(&mut self.device, noc_id, self.core.addr);
     }
 
     pub fn wait(&mut self) {
@@ -500,7 +508,7 @@ impl Kernel {
     pub fn all_complete(&mut self) -> bool {
         self.data
             .bin
-            .all_complete(&mut self.device, self.noc_id, self.core)
+            .all_complete(&mut self.device, self.noc_id, self.core.addr)
     }
 
     pub fn set_entry(&mut self) {
@@ -514,7 +522,7 @@ impl Kernel {
         self.data.set_entry(
             &mut self.device,
             self.noc_id,
-            self.core,
+            self.core.addr,
             cores.0,
             cores.1,
             cores.2,

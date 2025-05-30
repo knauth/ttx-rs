@@ -6,7 +6,7 @@ use tensix_builder::{CacheEnable, Rewrite};
 
 use crate::{
     chip::{
-        noc::{NocId, NocInterface, Tile},
+        noc::{NocAddress, NocId, NocInterface, Tile},
         Chip,
     },
     kernel::{Alignment16, CoreData, Kernel, KernelBinData, KernelBytes, KernelData},
@@ -59,7 +59,12 @@ pub fn stop_all(device: &mut Chip) {
     );
 }
 
-pub fn start(device: &mut Chip, core: Tile, keep_triscs_under_reset: bool, stagger_start: bool) {
+pub fn start(
+    device: &mut Chip,
+    core: NocAddress,
+    keep_triscs_under_reset: bool,
+    stagger_start: bool,
+) {
     let staggered_start_enable: u32 = if stagger_start { 1 << 31 } else { 0 };
 
     let soft_reset_value = if keep_triscs_under_reset {
@@ -77,7 +82,7 @@ pub fn start(device: &mut Chip, core: Tile, keep_triscs_under_reset: bool, stagg
     );
 }
 
-pub fn easy_start(device: &mut Chip, core: Tile) {
+pub fn easy_start(device: &mut Chip, core: NocAddress) {
     start(device, core, true, true);
 }
 
@@ -85,7 +90,9 @@ pub fn easy_start_all(device: &mut Chip) {
     start_all(device, true, true);
 }
 
-pub fn stop(device: &mut Chip, core: Tile) {
+pub fn stop<T: Into<NocAddress>>(device: &mut Chip, core: T) {
+    let core = core.into();
+
     let soft_reset_value = BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET;
     device.noc_write32(NocId::Noc0, core, 0xFFB121B0, soft_reset_value);
     let readback = device.noc_read32(NocId::Noc0, core, 0xFFB121B0);
@@ -437,7 +444,7 @@ pub fn quick_load(name: &str, mut device: Chip, core: Tile, options: LoadOptions
     );
 
     tracing::debug!("{}: starting {core:?}", device);
-    easy_start(&mut device, core);
+    easy_start(&mut device, core.addr);
 
     tracing::debug!("{}: waiting for {core:?} start", device);
     if kernel.data.bin.start_sync.is_some() {

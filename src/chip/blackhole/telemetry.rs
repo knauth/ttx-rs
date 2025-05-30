@@ -5,7 +5,7 @@ use num_derive::FromPrimitive;
 
 use crate::chip::{
     blackhole::arc::{arc_fw_init_status, ArcFwInitStatus},
-    noc::{NocId, Tile},
+    noc::{NocAddress, NocId},
 };
 
 use super::pci_noc::PciNoc;
@@ -122,7 +122,7 @@ impl TelemetryData {
 }
 
 impl Telemetry {
-    pub fn new(chip: &mut PciNoc, arc: Tile) -> Result<Self, TelemetryError> {
+    pub fn new(chip: &mut PciNoc, arc: NocAddress) -> Result<Self, TelemetryError> {
         if arc_fw_init_status(chip, arc) != Some(ArcFwInitStatus::Done) {
             return Err(TelemetryError::TelemetryNotReady);
         }
@@ -171,7 +171,7 @@ impl Telemetry {
         })
     }
 
-    pub fn read(&self, chip: &mut PciNoc, arc: Tile) -> Result<TelemetryData, PciError> {
+    pub fn read(&self, chip: &mut PciNoc, arc: NocAddress) -> Result<TelemetryData, PciError> {
         let mut data = vec![0; 4 * self.max_offset as usize];
         chip.tile_read(NocId::Noc0, arc, self.table_addr, &mut data)?;
 

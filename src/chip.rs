@@ -3,7 +3,7 @@ use std::sync::{atomic::AtomicBool, Mutex};
 use blackhole::Blackhole;
 use grayskull::Grayskull;
 use luwen::{luwen_core::Arch, ttkmd_if::PciDevice};
-use noc::{NocId, NocInterface, Tile};
+use noc::{NocAddress, NocId, NocInterface, Tile};
 use wormhole::Wormhole;
 
 use crate::kernel::{Kernel, KernelData};
@@ -284,7 +284,7 @@ impl Chip {
         }
     }
 
-    pub fn load(&mut self, name: &str, core: noc::Tile, options: loader::LoadOptions) -> Kernel {
+    pub fn load(&mut self, name: &str, core: Tile, options: loader::LoadOptions) -> Kernel {
         loader::quick_load(name, self.dupe().unwrap(), core, options)
     }
 
@@ -345,7 +345,7 @@ impl Chip {
         if let Some(tiles) = &tiles {
             for tile in tiles {
                 tracing::trace!("{}[{}]: starting tile {:?}", self.arch(), self.id(), tile);
-                loader::start(self, *tile, true, true);
+                loader::start(self, tile.addr, true, true);
             }
         } else {
             tracing::trace!("{}[{}]: starting all tensix", self.arch(), self.id());
@@ -374,10 +374,10 @@ impl Chip {
                     self.noc_write32(noc::NocId::Noc1, *tile, *id, core_id as u32);
                 }
 
-                data.bin.print_state(self, noc::NocId::Noc1, *tile);
-                while !data.bin.start_sync(self, noc::NocId::Noc1, *tile) {
-                    if !data.bin.all_complete(self, noc::NocId::Noc1, *tile) {
-                        data.bin.print_state_diff(self, noc::NocId::Noc1, *tile);
+                data.bin.print_state(self, noc::NocId::Noc1, tile.addr);
+                while !data.bin.start_sync(self, noc::NocId::Noc1, tile.addr) {
+                    if !data.bin.all_complete(self, noc::NocId::Noc1, tile.addr) {
+                        data.bin.print_state_diff(self, noc::NocId::Noc1, tile.addr);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
@@ -391,7 +391,7 @@ impl Chip {
                 self.id()
             );
             for tile in all_tiles {
-                data.bin.print_state(self, noc::NocId::Noc1, *tile);
+                data.bin.print_state(self, noc::NocId::Noc1, tile.addr);
             }
         }
 
@@ -417,7 +417,7 @@ impl Chip {
                 self.id(),
                 tile
             );
-            data.bin.wait(self, noc::NocId::Noc1, *tile);
+            data.bin.wait(self, noc::NocId::Noc1, tile.addr);
         }
 
         self.stop_tile(tiles);
@@ -442,7 +442,13 @@ impl Chip {
 }
 
 impl NocInterface for Chip {
-    fn noc_read(&mut self, noc_id: noc::NocId, tile: noc::Tile, addr: u64, data: &mut [u8]) {
+    fn noc_read<T: Into<NocAddress>>(
+        &mut self,
+        noc_id: noc::NocId,
+        tile: T,
+        addr: u64,
+        data: &mut [u8],
+    ) {
         match self {
             Chip::Grayskull(grayskull) => grayskull.noc_read(noc_id, tile, addr, data),
             Chip::Wormhole(wormhole) => wormhole.noc_read(noc_id, tile, addr, data),
@@ -450,7 +456,7 @@ impl NocInterface for Chip {
         }
     }
 
-    fn noc_read32(&mut self, noc_id: noc::NocId, tile: noc::Tile, addr: u64) -> u32 {
+    fn noc_read32<T: Into<NocAddress>>(&mut self, noc_id: noc::NocId, tile: T, addr: u64) -> u32 {
         match self {
             Chip::Grayskull(grayskull) => grayskull.noc_read32(noc_id, tile, addr),
             Chip::Wormhole(wormhole) => wormhole.noc_read32(noc_id, tile, addr),
@@ -458,7 +464,13 @@ impl NocInterface for Chip {
         }
     }
 
-    fn noc_write(&mut self, noc_id: noc::NocId, tile: noc::Tile, addr: u64, data: &[u8]) {
+    fn noc_write<T: Into<NocAddress>>(
+        &mut self,
+        noc_id: noc::NocId,
+        tile: T,
+        addr: u64,
+        data: &[u8],
+    ) {
         match self {
             Chip::Grayskull(grayskull) => grayskull.noc_write(noc_id, tile, addr, data),
             Chip::Wormhole(wormhole) => wormhole.noc_write(noc_id, tile, addr, data),
@@ -466,7 +478,13 @@ impl NocInterface for Chip {
         }
     }
 
-    fn noc_write32(&mut self, noc_id: noc::NocId, tile: noc::Tile, addr: u64, value: u32) {
+    fn noc_write32<T: Into<NocAddress>>(
+        &mut self,
+        noc_id: noc::NocId,
+        tile: T,
+        addr: u64,
+        value: u32,
+    ) {
         match self {
             Chip::Grayskull(grayskull) => grayskull.noc_write32(noc_id, tile, addr, value),
             Chip::Wormhole(wormhole) => wormhole.noc_write32(noc_id, tile, addr, value),
